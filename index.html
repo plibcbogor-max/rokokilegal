@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Peta Pengaduan Rokok Ilegal - Bea Cukai Bogor</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; background-color: #f8f9fa;}
+        
+        #input-panel { width: 380px; background-color: #ffffff; padding: 20px; border-right: 2px solid #e0e0e0; display: flex; flex-direction: column; overflow-y: auto; box-sizing: border-box; box-shadow: 2px 0 5px rgba(0,0,0,0.05); z-index: 10;}
+        #map { flex-grow: 1; height: 100%; position: relative;}
+
+        .header-title { color: #2c3e50; margin-bottom: 0; font-size: 20px; font-weight: 800; text-transform: uppercase;}
+        .header-subtitle { color: #7f8c8d; margin-top: 5px; margin-bottom: 25px; font-size: 14px; font-weight: 600; letter-spacing: 1px;}
+        
+        .form-group { margin-bottom: 12px; }
+        label { display: block; margin-bottom: 4px; font-weight: 600; color: #34495e; font-size: 13px;}
+        input[type="text"], textarea { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-size: 14px; transition: border-color 0.3s; font-family: inherit;}
+        textarea { resize: vertical; height: 60px; }
+        input[type="text"]:focus, textarea:focus { border-color: #3498db; outline: none; }
+        
+        button { background-color: #0d6efd; color: white; padding: 12px; border: none; border-radius: 6px; cursor: pointer; width: 100%; font-size: 15px; font-weight: bold; transition: background 0.3s; margin-top: 10px;}
+        button:hover { background-color: #0b5ed7; }
+        button:disabled { background-color: #9ec5fe; cursor: not-allowed; }
+
+        .list-header { margin-top: 25px; border-top: 2px solid #f1f5f9; padding-top: 15px; font-weight: bold; color: #475569; font-size: 14px;}
+        #report-list { list-style: none; padding: 0; margin-top: 10px; }
+        #report-list li { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; margin-bottom: 8px; font-size: 12px; color: #64748b; }
+        
+        #loading-status { display: none; margin-top: 15px; padding: 10px; border-radius: 6px; text-align: center; font-size: 13px; font-weight: 600;}
+        .status-info { color: #b45309; background-color: #fef3c7; border: 1px solid #fde68a; }
+        .status-error { color: #842029; background-color: #f8d7da; border: 1px solid #f5c2c7; }
+        .status-success { color: #0f5132; background-color: #d1e7dd; border: 1px solid #badbcc; }
+
+        .owner-mark { position: absolute; bottom: 20px; left: 20px; z-index: 1000; font-family: 'Courier New', Courier, monospace; font-size: 18px; font-weight: bold; color: #2c3e50; background-color: rgba(255, 255, 255, 0.7); padding: 5px 10px; border-radius: 4px; border: 1px solid #bdc3c7; pointer-events: none; }
+        
+        .leaflet-tooltip.custom-hover { background-color: rgba(44, 62, 80, 0.9); color: white; border: none; border-radius: 4px; font-weight: bold; font-size: 13px; padding: 6px 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+        .leaflet-tooltip.custom-hover::before { border-top-color: rgba(44, 62, 80, 0.9); }
+
+        /* Debug panel */
+        #debug-panel { position: fixed; bottom: 10px; right: 10px; background: white; border: 2px solid #e74c3c; border-radius: 8px; padding: 10px; max-width: 300px; max-height: 200px; overflow: auto; font-size: 11px; z-index: 2000; display: none; box-shadow: 0 4px 6px rgba(0,0,0,0.1);}
+        .debug-header { background: #e74c3c; color: white; padding: 5px; margin: -10px -10px 10px -10px; border-radius: 6px 6px 0 0; font-weight: bold; cursor: pointer;}
+        #debug-content { font-family: monospace; white-space: pre-wrap; }
+        #toggle-debug { position: fixed; bottom: 10px; right: 10px; z-index: 2001; background: #e74c3c; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 20px; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.2);}
+    </style>
+</head>
+<body>
+
+    <div id="input-panel">
+        <h2 class="header-title">PETA LAPORAN PENGADUAN ROKOK ILEGAL</h2>
+        <div class="header-subtitle">PLI BEA CUKAI BOGOR</div>
+        
+        <div class="form-group">
+            <label>Provinsi</label>
+            <input type="text" id="provinsi" value="Jawa Barat">
+        </div>
+        <div class="form-group">
+            <label>Kota/Kabupaten *</label>
+            <input type="text" id="kotakab" placeholder="Contoh: Kabupaten Bogor" required>
+        </div>
+        <div class="form-group">
+            <label>Kecamatan *</label>
+            <input type="text" id="kecamatan" placeholder="Contoh: Cibinong" required>
+        </div>
+        <div class="form-group">
+            <label>Kelurahan/Desa</label>
+            <input type="text" id="kelurahan" placeholder="Opsional">
+        </div>
+        <div class="form-group">
+            <label>Keterangan / Info Tambahan</label>
+            <textarea id="keterangan" placeholder="Contoh: Toko ABC menjual rokok tanpa pita cukai"></textarea>
+        </div>
+        
+        <button id="add-btn" onclick="addReport()">Simpan ke Peta & Server</button>
+        
+        <div id="loading-status" class="status-info">Sedang memproses...</div>
+
+        <div class="list-header">Laporan Terbaru</div>
+        <ul id="report-list"></ul>
+    </div>
+
+    <div id="map">
+        <div class="owner-mark">-FOK</div>
+    </div>
+
+    <!-- Debug Panel -->
+    <button id="toggle-debug" onclick="toggleDebug()">🐞</button>
+    <div id="debug-panel">
+        <div class="debug-header" onclick="toggleDebug()">DEBUG PANEL - Klik untuk tutup</div>
+        <div id="debug-content"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        // ==============================================================================
+        // KONFIGURASI - GANTI DENGAN URL GOOGLE APPS SCRIPT ANDA
+        // ==============================================================================
+        const scriptURL = 'https://script.google.com/macros/s/AKfycbzSaJJDCrqRYznyqyDP7JmwWmXwkd_lpyfsg_vsnZW6i6QJEx0A3Pd7OfcRmqGaQzNe/exec'; 
+        
+        // ==============================================================================
+        // DATA DUMMY UNTUK TESTING (HAPUS KOMENTAR UNTUK MENGAKTIFKAN)
+        // ==============================================================================
+        const USE_DUMMY_DATA = true; // Ubah ke false jika sudah terhubung dengan Google Sheets
+        
+        // ==============================================================================
+        // INISIALISASI PETA
+        // ==============================================================================
+        var map = L.map('map', { zoomControl: false }).setView([-6.5950, 106.7890], 11);
+        L.control.zoom({ position: 'topright' }).addTo(map);
+
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+        }).addTo(map);
+
+        var markerGroup = L.layerGroup().addTo(map);
+        var reportsData = [];
+        var debugMode = false;
+
+        // ==============================================================================
+        // FUNGSI DEBUGGING
+        // ==============================================================================
+        function debugLog(message, data = null) {
+            console.log(message, data || '');
+            
+            if (!debugMode) return;
+            
+            var debugContent = document.getElementById('debug-content');
+            var timestamp = new Date().toLocaleTimeString();
+            var logMessage = `[${timestamp}] ${message}`;
+            
+            if (data) {
+                logMessage += `\n${JSON.stringify(data, null, 2)}`;
+            }
+            
+            debugContent.innerHTML = logMessage + '\n' + debugContent.innerHTML;
+        }
+
+        function toggleDebug() {
+            debugMode = !debugMode;
+            var panel = document.getElementById('debug-panel');
+            var btn = document.getElementById('toggle-debug');
+            
+            if (debugMode) {
+                panel.style.display = 'block';
+                btn.style.backgroundColor = '#27ae60';
+                debugLog('Debug mode activated');
+            } else {
+                panel.style.display = 'none';
+                btn.style.backgroundColor = '#e74c3c';
+            }
+        }
+
+        // ==============================================================================
+        // DATA DUMMY UNTUK TESTING
+        // ==============================================================================
+        function generateDummyData() {
+            debugLog('Generating dummy data for testing');
+            
+            return [
+                {
+                    lat: -6.5950,
+                    lon: 106.7890,
+                    kota: "Kota Bogor",
+                    kecamatan: "Bogor Tengah",
+                    kelurahan: "Pabaton",
+                    keterangan: "Toko A menjual rokok ilegal",
+                    timestamp: new Date().toISOString(),
+                    locationId: "kotabogorbogortengahpabaton"
+                },
+                {
+                    lat: -6.5950,
+                    lon: 106.7890,
+                    kota: "Kota Bogor",
+                    kecamatan: "Bogor Tengah",
+                    kelurahan: "Pabaton",
+                    keterangan: "Warung B juga menjual",
+                    timestamp: new Date().toISOString(),
+                    locationId: "kotabogorbogortengahpabaton"
+                },
+                {
+                    lat: -6.5483,
+                    lon: 106.7918,
+                    kota: "Kota Bogor",
+                    kecamatan: "Bogor Timur",
+                    kelurahan: "Katulampa",
+                    keterangan: "Tempat hiburan malam menjual rokok ilegal",
+                    timestamp: new Date().toISOString(),
+                    locationId: "kotabogorbogortimurkatulampa"
+                }
+            ];
+        }
+
+        // ==============================================================================
+        // INISIALISASI
+        // ==============================================================================
+        window.onload = function() {
+            debugLog('Page loaded');
+            
+            // Tambah data dummy untuk testing jika diperlukan
+            if (USE_DUMMY_DATA) {
+                reportsData = generateDummyData();
+                debugLog('Dummy data added', reportsData);
+                renderAllMarkers();
+                updateReportList();
+                setStatus('Menggunakan data dummy untuk testing', 'status-info');
+                
+                // Tetap coba load data dari Google Sheets sebagai background
+                setTimeout(() => {
+                    loadDataFromGoogle();
+                }, 2000);
+            } else {
+                loadDataFromGoogle();
+            }
+        };
+
+        function setStatus(message, type) {
+            var statusDiv = document.getElementById('loading-status');
+            statusDiv.className = type;
+            statusDiv.innerText = message;
+            statusDiv.style.display = "block";
+            debugLog('Status: ' + message, { type: type });
+            
+            // Auto hide setelah 3 detik untuk status success/error
+            if (type !== 'status-info') {
+                setTimeout(() => {
+                    statusDiv.style.display = "none";
+                }, 3000);
+            }
+        }
+
+        // ==============================================================================
+        // LOAD DATA DARI GOOGLE SHEETS
+        // ==============================================================================
+        async function loadDataFromGoogle() {
+            if (scriptURL.includes('MASUKKAN_URL')) {
+                debugLog('Script URL belum diisi, menggunakan dummy data');
+                if (!USE_DUMMY_DATA) {
+                    setStatus("Harap isi URL Google Apps Script terlebih dahulu", "status-error");
+                }
+                return;
+            }
+            
+            setStatus("Mengambil data dari server...", "status-info");
+            
+            try {
+                debugLog('Fetching data from:', scriptURL);
+                
+                let response = await fetch(scriptURL);
+                let data = await response.json();
+                
+                debugLog('Raw data from server:', data);
+                
+                // Pastikan data adalah array
+                if (!Array.isArray(data)) {
+                    debugLog('Data bukan array, konversi ke array', data);
+                    data = data ? [data] : [];
+                }
+                
+                // Normalisasi data
+                var normalizedData = data.map((item, index) => {
+                    // Handle berbagai kemungkinan nama field
+                    return {
+                        lat: parseFloat(item.lat || item.Lat || item.latitude || item.Latitude || 0),
+                        lon: parseFloat(item.lon || item.Lon || item.longitude || item.Longitude || 0),
+                        kota: item.kota || item.Kota || item.kabupaten || item.Kabupaten || "",
+                        kecamatan: item.kecamatan || item.Kecamatan || "",
+                        kelurahan: item.kelurahan || item.Kelurahan || item.desa || item.Desa || "",
+                        keterangan: item.keterangan || item.Keterangan || item.catatan || item.Catatan || item.deskripsi || "",
+                        timestamp: item.timestamp || item.Timestamp || item.tanggal || item.Tanggal || new Date().toISOString(),
+                        locationId: item.locationId || item.LocationId || ""
+                    };
+                }).filter(item => {
+                    // Filter hanya data dengan koordinat valid
+                    var valid = !isNaN(item.lat) && !isNaN(item.lon) && item.lat !== 0 && item.lon !== 0;
+                    if (!valid) {
+                        debugLog('Data tidak valid:', item);
+                    }
+                    return valid;
+                });
+                
+                debugLog('Data setelah normalisasi:', normalizedData);
+                
+                // Gabungkan dengan data dummy jika ada
+                if (USE_DUMMY_DATA) {
+                    // Hanya tambahkan data baru yang belum ada di dummy (hindari duplikat)
+                    var existingIds = new Set(reportsData.map(r => r.locationId));
+                    var newData = normalizedData.filter(item => !existingIds.has(item.locationId));
+                    reportsData = [...reportsData, ...newData];
+                } else {
+                    reportsData = normalizedData;
+                }
+                
+                debugLog('Total reportsData setelah load:', reportsData.length);
+                
+                renderAllMarkers();
+                updateReportList();
+                setStatus("Data berhasil dimuat!", "status-success");
+                
+            } catch (error) {
+                debugLog('Error loading data:', error);
+                setStatus("Gagal memuat database: " + error.message, "status-error");
+                
+                if (!USE_DUMMY_DATA) {
+                    alert("GAGAL MEMUAT DATA: " + error.message);
+                }
+            }
+        }
+
+        // ==============================================================================
+        // TAMBAH LAPORAN BARU - INI BAGIAN YANG DIPERBAIKI
+        // ==============================================================================
+        async function addReport() {
+            var prov = document.getElementById('provinsi').value.trim();
+            var kota = document.getElementById('kotakab').value.trim();
+            var kec = document.getElementById('kecamatan').value.trim();
+            var kel = document.getElementById('kelurahan').value.trim();
+            var ket = document.getElementById('keterangan').value.trim();
+            var addBtn = document.getElementById('add-btn');
+
+            debugLog('Add report initiated', { prov, kota, kec, kel, ket });
+
+            if (scriptURL.includes('MASUKKAN_URL') && !USE_DUMMY_DATA) {
+                alert("GAGAL: Anda belum memasukkan URL Google Apps Script.");
+                return;
+            }
+
+            if (kota === "" || kec === "") {
+                alert("Kota/Kabupaten dan Kecamatan wajib diisi!");
+                return;
+            }
+
+            addBtn.disabled = true;
+            setStatus("Mencari titik koordinat di peta...", "status-info");
+
+            var addressString = (kel ? kel + ", " : "") + kec + ", " + kota + ", " + prov + ", Indonesia";
+            debugLog('Searching address:', addressString);
+            
+            var lat, lon, locationId;
+
+            try {
+                // Gunakan Nominatim dengan delay untuk menghindari rate limiting
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                var nominatimRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressString)}&limit=1`);
+                var results = await nominatimRes.json();
+
+                debugLog('Nominatim results:', results);
+
+                if (results && results.length > 0) {
+                    lat = parseFloat(results[0].lat);
+                    lon = parseFloat(results[0].lon);
+                    
+                    // Buat locationId yang konsisten
+                    locationId = (kota + kec + kel).toLowerCase()
+                        .replace(/\s+/g, '')
+                        .replace(/[^a-z0-9]/g, '');
+                    
+                    debugLog('Coordinates found:', { lat, lon, locationId });
+                } else {
+                    setStatus("Lokasi tidak ditemukan. Coba gunakan nama yang lebih spesifik.", "status-error");
+                    addBtn.disabled = false;
+                    return;
+                }
+            } catch (error) {
+                debugLog('Geocoding error:', error);
+                setStatus("Gagal mencari lokasi: " + error.message, "status-error");
+                addBtn.disabled = false;
+                return;
+            }
+
+            // ===== PERBAIKAN UTAMA: Pastikan data real masuk dengan format yang benar =====
+            
+            // Buat object laporan baru dengan format yang sama persis dengan dummy data
+            var newReport = {
+                lat: lat,                    // Pastini ini number, bukan string
+                lon: lon,                    // Pastini ini number, bukan string
+                kota: kota,
+                kecamatan: kec,
+                kelurahan: kel,
+                keterangan: ket || "(tanpa keterangan)",
+                timestamp: new Date().toISOString(),
+                locationId: locationId
+            };
+            
+            debugLog('New report object:', newReport);
+            
+            // Tambahkan ke reportsData (tanpa menghapus data yang sudah ada)
+            reportsData.push(newReport);
+            
+            debugLog('reportsData after push:', reportsData);
+            debugLog('Total reportsData now:', reportsData.length);
+            
+            // Render ulang marker
+            renderAllMarkers();
+            
+            // Update daftar laporan
+            updateReportList();
+            
+            // Zoom ke lokasi baru
+            map.setView([lat, lon], 14);
+            
+            // Tampilkan pesan sukses
+            setStatus("Data real berhasil ditambahkan ke peta!", "status-success");
+            
+            // Kirim ke server jika URL sudah diisi
+            if (!scriptURL.includes('MASUKKAN_URL')) {
+                setStatus("Menyimpan data ke server...", "status-info");
+                
+                try {
+                    var postData = new FormData();
+                    postData.append('provinsi', prov);
+                    postData.append('kota', kota);
+                    postData.append('kecamatan', kec);
+                    postData.append('kelurahan', kel);
+                    postData.append('keterangan', ket);
+                    postData.append('lat', lat);
+                    postData.append('lon', lon);
+                    postData.append('locationId', locationId);
+                    postData.append('timestamp', newReport.timestamp);
+
+                    debugLog('Sending to server:', { prov, kota, kec, kel, ket, lat, lon, locationId });
+
+                    // Gunakan mode 'no-cors' tapi jangan tunggu respons
+                    fetch(scriptURL, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        body: postData
+                    }).then(() => {
+                        debugLog('Data sent to server (no-cors mode)');
+                    }).catch(error => {
+                        debugLog('Error sending to server:', error);
+                    });
+
+                } catch (error) {
+                    debugLog('Error saving to server:', error);
+                    setStatus("Data tersimpan di peta tapi gagal ke server.", "status-warning");
+                }
+            }
+
+            // Reset form
+            document.getElementById('kecamatan').value = '';
+            document.getElementById('kelurahan').value = '';
+            document.getElementById('keterangan').value = '';
+            
+            addBtn.disabled = false;
+        }
+
+        // ==============================================================================
+        // RENDER MARKER DI PETA - VERSI YANG LEBIH ROBUST
+        // ==============================================================================
+        function renderAllMarkers() {
+            debugLog('Rendering markers, total data:', reportsData.length);
+            
+            markerGroup.clearLayers();
+            
+            if (reportsData.length === 0) {
+                debugLog('Tidak ada data untuk dirender');
+                setStatus('Tidak ada data laporan', 'status-info');
+                return;
+            }
+            
+            var uniqueLocations = {};
+            var validDataCount = 0;
+            var invalidDataCount = 0;
+            
+            reportsData.forEach(function(r, index) {
+                // Validasi data
+                if (!r || typeof r !== 'object') {
+                    invalidDataCount++;
+                    debugLog(`Data[${index}] tidak valid (bukan object):`, r);
+                    return;
+                }
+                
+                // KONVERSI KOORDINAT YANG LEBIH AMAN
+                var lat, lon;
+                
+                // Handle lat
+                if (typeof r.lat === 'number') {
+                    lat = r.lat;
+                } else if (typeof r.lat === 'string') {
+                    lat = parseFloat(r.lat.replace(',', '.'));
+                } else {
+                    lat = parseFloat(r.lat);
+                }
+                
+                // Handle lon
+                if (typeof r.lon === 'number') {
+                    lon = r.lon;
+                } else if (typeof r.lon === 'string') {
+                    lon = parseFloat(r.lon.replace(',', '.'));
+                } else {
+                    lon = parseFloat(r.lon);
+                }
+                
+                // Validasi koordinat
+                var isValid = !isNaN(lat) && !isNaN(lon) && 
+                              isFinite(lat) && isFinite(lon) &&
+                              lat >= -90 && lat <= 90 && 
+                              lon >= -180 && lon <= 180;
+                
+                if (!isValid) {
+                    invalidDataCount++;
+                    debugLog(`Data[${index}] koordinat tidak valid:`, { 
+                        original: r, 
+                        lat: r.lat, 
+                        lon: r.lon,
+                        parsedLat: lat, 
+                        parsedLon: lon 
+                    });
+                    return;
+                }
+                
+                validDataCount++;
+                
+                // Buat locationId jika tidak ada
+                if (!r.locationId) {
+                    r.locationId = (r.kota || '') + (r.kecamatan || '') + (r.kelurahan || '');
+                    r.locationId = r.locationId.toLowerCase().replace(/[^a-z0-9]/g, '');
+                }
+                
+                // Gunakan locationId sebagai kunci
+                var locKey = String(r.locationId || `loc-${index}`);
+                
+                if (!uniqueLocations[locKey]) {
+                    // Nama yang ditampilkan
+                    var displayName = r.kelurahan ? r.kelurahan : (r.kecamatan || 'Lokasi');
+                    
+                    uniqueLocations[locKey] = {
+                        displayName: displayName,
+                        fullInput: `Kel. ${r.kelurahan || '-'}, Kec. ${r.kecamatan || '-'}, ${r.kota || '-'}`,
+                        lat: lat,
+                        lon: lon,
+                        count: 0,
+                        keteranganList: []
+                    };
+                    
+                    debugLog('New unique location:', { locKey, lat, lon, displayName });
+                }
+                
+                uniqueLocations[locKey].count++;
+                
+                if (r.keterangan && r.keterangan.trim() !== "" && r.keterangan !== "(tanpa keterangan)") {
+                    let dateStr = 'baru';
+                    try {
+                        if (r.timestamp) {
+                            dateStr = new Date(r.timestamp).toLocaleDateString('id-ID');
+                        }
+                    } catch (e) {
+                        // Abaikan error date
+                    }
+                    uniqueLocations[locKey].keteranganList.push(`<i>[${dateStr}]</i> ${r.keterangan}`);
+                }
+            });
+            
+            debugLog(`Data valid: ${validDataCount}, Data tidak valid: ${invalidDataCount}, Total: ${reportsData.length}`);
+            debugLog('Unique locations:', Object.keys(uniqueLocations).length);
+            
+            var markerCount = 0;
+            
+            for (var id in uniqueLocations) {
+                var loc = uniqueLocations[id];
+                
+                // Hitung radius (min 10, max 40)
+                var calculatedRadius = Math.min(40, 10 + ((loc.count - 1) * 8));
+                
+                debugLog(`Rendering marker for ${id}: radius=${calculatedRadius}, count=${loc.count}, pos=[${loc.lat}, ${loc.lon}]`);
+                
+                var ketHtml = loc.keteranganList.length > 0 
+                    ? `<div style="text-align:left; font-size:11px; margin-top:10px; max-height:100px; overflow-y:auto; background:#f8f9fa; padding:5px; border-radius:4px; border:1px solid #ddd;">
+                       <strong>Catatan Laporan (${loc.keteranganList.length}):</strong><br>${loc.keteranganList.join('<br><hr style="margin:4px 0;">')}</div>` 
+                    : "<div style='text-align:left; font-size:11px; margin-top:10px; color:#95a5a6;'>Tidak ada keterangan</div>";
+
+                var popupText = `
+                    <div style="text-align:center; font-family:sans-serif; min-width:200px;">
+                        <strong style="font-size:14px; color:#2c3e50;">${loc.displayName.toUpperCase()}</strong><br>
+                        <span style="font-size:11px; color:#7f8c8d;">${loc.fullInput}</span><br>
+                        <hr style="margin:8px 0; border:0; border-top:1px solid #ecf0f1;">
+                        <span style="font-size:12px;">Total Pengaduan:</span><br>
+                        <strong style="font-size:32px; color:#e74c3c;">${loc.count}</strong>
+                        ${ketHtml}
+                    </div>
+                `;
+
+                var hoverText = `<strong>${loc.displayName.toUpperCase()}</strong><br>${loc.count} Laporan`;
+
+                try {
+                    var marker = L.circleMarker([loc.lat, loc.lon], {
+                        radius: calculatedRadius,
+                        fillColor: "#e74c3c", 
+                        color: "#c0392b", 
+                        weight: 2,
+                        opacity: 0.9,
+                        fillOpacity: 0.6 
+                    });
+
+                    marker.bindTooltip(hoverText, {
+                        direction: 'top', 
+                        className: 'custom-hover',
+                        offset: [0, -10]
+                    });
+
+                    marker.bindPopup(popupText);
+                    markerGroup.addLayer(marker);
+                    markerCount++;
+                    
+                } catch (error) {
+                    debugLog('Error creating marker:', error);
+                }
+            }
+            
+            debugLog(`Total marker dirender: ${markerCount}`);
+            
+            // Update status
+            if (markerCount === 0) {
+                if (validDataCount > 0) {
+                    setStatus(`Ada ${validDataCount} data valid tapi gagal dirender`, 'status-error');
+                } else {
+                    setStatus('Tidak ada data dengan koordinat valid', 'status-error');
+                }
+            } else {
+                setStatus(`Menampilkan ${markerCount} lokasi dari ${validDataCount} laporan`, 'status-success');
+            }
+        }
+
+        // ==============================================================================
+        // UPDATE DAFTAR LAPORAN
+        // ==============================================================================
+        function updateReportList() {
+            var listHtml = "";
+            
+            // Filter data valid
+            var validData = reportsData.filter(r => {
+                if (!r) return false;
+                
+                var lat = typeof r.lat === 'number' ? r.lat : parseFloat(String(r.lat || '').replace(',', '.'));
+                var lon = typeof r.lon === 'number' ? r.lon : parseFloat(String(r.lon || '').replace(',', '.'));
+                return !isNaN(lat) && !isNaN(lon) && isFinite(lat) && isFinite(lon);
+            });
+            
+            // Ambil 5 data terbaru
+            var lastReports = validData.slice(-5).reverse();
+            
+            lastReports.forEach(function(r) {
+                let shortDate = 'baru';
+                try {
+                    if (r.timestamp) {
+                        shortDate = new Date(r.timestamp).toLocaleDateString('id-ID');
+                    }
+                } catch (e) {}
+                
+                let addr = r.kelurahan ? r.kelurahan : (r.kecamatan || 'Unknown');
+                let location = r.kecamatan ? `${r.kecamatan}, ${r.kota || ''}` : '';
+                let ket = r.keterangan || 'Tanpa keterangan';
+                if (ket === '(tanpa keterangan)') ket = '-';
+                
+                listHtml += `<li>
+                    <b>${addr}</b><br>
+                    <span style="font-size:10px;">${location}</span><br>
+                    <span style="font-size:10px; color:#94a3b8;">${shortDate} - ${ket}</span>
+                </li>`;
+            });
+            
+            // Header dengan total
+            let totalValid = validData.length;
+            let totalAll = reportsData.length;
+            listHtml = `<li style="text-align:center; background:#e2e8f0; font-weight:bold; padding:8px;">Total Laporan Valid: ${totalValid} dari ${totalAll}</li>` + listHtml;
+            
+            document.getElementById('report-list').innerHTML = listHtml;
+            debugLog('Report list updated, total valid:', totalValid);
+        }
+
+        // ==============================================================================
+        // FUNGSI UNTUK TESTING INPUT DATA REAL
+        // ==============================================================================
+        function testAddRealData() {
+            // Fungsi ini untuk testing manual di console browser
+            var testReport = {
+                lat: -6.5950,
+                lon: 106.7890,
+                kota: "Kota Bogor",
+                kecamatan: "Bogor Tengah",
+                kelurahan: "Pabaton",
+                keterangan: "Test real data from console",
+                timestamp: new Date().toISOString(),
+                locationId: "testreal" + Date.now()
+            };
+            
+            reportsData.push(testReport);
+            renderAllMarkers();
+            updateReportList();
+            console.log('Test data added:', testReport);
+        }
+    </script>
+</body>
+</html>
