@@ -45,6 +45,10 @@
         .debug-header { background: #e74c3c; color: white; padding: 5px; margin: -10px -10px 10px -10px; border-radius: 6px 6px 0 0; font-weight: bold; cursor: pointer;}
         #debug-content { font-family: monospace; white-space: pre-wrap; }
         #toggle-debug { position: fixed; bottom: 10px; right: 10px; z-index: 2001; background: #e74c3c; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 20px; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.2);}
+        
+        /* Loading indicator */
+        .loading-spinner { display: inline-block; width: 16px; height: 16px; border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 8px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
@@ -80,6 +84,9 @@
 
         <div class="list-header">Laporan Terbaru</div>
         <ul id="report-list"></ul>
+        
+        <!-- Tombol Refresh Manual -->
+        <button id="refresh-btn" onclick="manualRefresh()" style="background-color: #28a745; margin-top: 10px;">🔄 Refresh Data dari Sheet</button>
     </div>
 
     <div id="map">
@@ -104,7 +111,7 @@
         // ==============================================================================
         // DATA DUMMY UNTUK TESTING (HAPUS KOMENTAR UNTUK MENGAKTIFKAN)
         // ==============================================================================
-        const USE_DUMMY_DATA = true; // Ubah ke false jika sudah terhubung dengan Google Sheets
+        const USE_DUMMY_DATA = false; // Ubah ke false jika sudah terhubung dengan Google Sheets
         
         // ==============================================================================
         // INISIALISASI PETA
@@ -119,6 +126,9 @@
         var markerGroup = L.layerGroup().addTo(map);
         var reportsData = [];
         var debugMode = false;
+        
+        // Cache untuk menyimpan data di localStorage agar tidak hilang saat refresh
+        var CACHE_KEY = 'rokokIlegalReports';
 
         // ==============================================================================
         // FUNGSI DEBUGGING
@@ -137,6 +147,11 @@
             }
             
             debugContent.innerHTML = logMessage + '\n' + debugContent.innerHTML;
+            
+            // Batasi panjang log
+            if (debugContent.innerHTML.length > 5000) {
+                debugContent.innerHTML = debugContent.innerHTML.substring(0, 5000) + '... (truncated)';
+            }
         }
 
         function toggleDebug() {
@@ -152,6 +167,37 @@
                 panel.style.display = 'none';
                 btn.style.backgroundColor = '#e74c3c';
             }
+        }
+
+        // ==============================================================================
+        // FUNGSI UNTUK MENYIMPAN DAN MEMUAT CACHE
+        // ==============================================================================
+        function saveToCache() {
+            try {
+                var dataToSave = reportsData.map(item => ({
+                    ...item,
+                    // Pastikan tidak ada circular reference
+                    _cached: true
+                }));
+                localStorage.setItem(CACHE_KEY, JSON.stringify(dataToSave));
+                debugLog('Data disimpan ke cache', { count: dataToSave.length });
+            } catch (e) {
+                debugLog('Gagal menyimpan ke cache:', e);
+            }
+        }
+
+        function loadFromCache() {
+            try {
+                var cached = localStorage.getItem(CACHE_KEY);
+                if (cached) {
+                    var data = JSON.parse(cached);
+                    debugLog('Data dimuat dari cache', { count: data.length });
+                    return data;
+                }
+            } catch (e) {
+                debugLog('Gagal memuat dari cache:', e);
+            }
+            return [];
         }
 
         // ==============================================================================
@@ -200,27 +246,33 @@
         window.onload = function() {
             debugLog('Page loaded');
             
-            // Tambah data dummy untuk testing jika diperlukan
-            if (USE_DUMMY_DATA) {
-                reportsData = generateDummyData();
-                debugLog('Dummy data added', reportsData);
+            // Coba load dari cache dulu
+            var cachedData = loadFromCache();
+            if (cachedData.length > 0) {
+                reportsData = cachedData;
+                debugLog('Menggunakan data dari cache', reportsData);
                 renderAllMarkers();
                 updateReportList();
+                setStatus('Memuat data dari cache...', 'status-info');
+            } else if (USE_DUMMY_DATA) {
+                reportsData = generateDummyData();
+                debugLog('Menggunakan dummy data', reportsData);
+                renderAllMarkers();
+                updateReportList();
+                saveToCache();
                 setStatus('Menggunakan data dummy untuk testing', 'status-info');
-                
-                // Tetap coba load data dari Google Sheets sebagai background
-                setTimeout(() => {
-                    loadDataFromGoogle();
-                }, 2000);
-            } else {
-                loadDataFromGoogle();
             }
+            
+            // Load data dari Google Sheets
+            setTimeout(() => {
+                loadDataFromGoogle();
+            }, 1000);
         };
 
         function setStatus(message, type) {
             var statusDiv = document.getElementById('loading-status');
             statusDiv.className = type;
-            statusDiv.innerText = message;
+            statusDiv.innerHTML = message;
             statusDiv.style.display = "block";
             debugLog('Status: ' + message, { type: type });
             
@@ -233,23 +285,24 @@
         }
 
         // ==============================================================================
-        // LOAD DATA DARI GOOGLE SHEETS
+        // LOAD DATA DARI GOOGLE SHEETS - VERSI YANG DIPERBAIKI
         // ==============================================================================
         async function loadDataFromGoogle() {
             if (scriptURL.includes('MASUKKAN_URL')) {
-                debugLog('Script URL belum diisi, menggunakan dummy data');
-                if (!USE_DUMMY_DATA) {
+                debugLog('Script URL belum diisi');
+                if (!USE_DUMMY_DATA && reportsData.length === 0) {
                     setStatus("Harap isi URL Google Apps Script terlebih dahulu", "status-error");
                 }
                 return;
             }
             
-            setStatus("Mengambil data dari server...", "status-info");
+            setStatus('<span class="loading-spinner"></span> Mengambil data dari server...', "status-info");
             
             try {
                 debugLog('Fetching data from:', scriptURL);
                 
-                let response = await fetch(scriptURL);
+                // Tambahkan parameter timestamp untuk menghindari cache
+                let response = await fetch(scriptURL + '?t=' + Date.now());
                 let data = await response.json();
                 
                 debugLog('Raw data from server:', data);
@@ -260,58 +313,136 @@
                     data = data ? [data] : [];
                 }
                 
-                // Normalisasi data
-                var normalizedData = data.map((item, index) => {
-                    // Handle berbagai kemungkinan nama field
-                    return {
-                        lat: parseFloat(item.lat || item.Lat || item.latitude || item.Latitude || 0),
-                        lon: parseFloat(item.lon || item.Lon || item.longitude || item.Longitude || 0),
-                        kota: item.kota || item.Kota || item.kabupaten || item.Kabupaten || "",
-                        kecamatan: item.kecamatan || item.Kecamatan || "",
-                        kelurahan: item.kelurahan || item.Kelurahan || item.desa || item.Desa || "",
-                        keterangan: item.keterangan || item.Keterangan || item.catatan || item.Catatan || item.deskripsi || "",
-                        timestamp: item.timestamp || item.Timestamp || item.tanggal || item.Tanggal || new Date().toISOString(),
-                        locationId: item.locationId || item.LocationId || ""
-                    };
-                }).filter(item => {
-                    // Filter hanya data dengan koordinat valid
-                    var valid = !isNaN(item.lat) && !isNaN(item.lon) && item.lat !== 0 && item.lon !== 0;
-                    if (!valid) {
-                        debugLog('Data tidak valid:', item);
+                if (data.length === 0) {
+                    debugLog('Data kosong dari server');
+                    setStatus('Tidak ada data di Google Sheets', 'status-info');
+                    return;
+                }
+                
+                // Normalisasi data dengan lebih baik
+                var normalizedData = [];
+                var errors = [];
+                
+                data.forEach((item, index) => {
+                    try {
+                        // Deteksi format kolom dari data pertama
+                        if (index === 0) {
+                            debugLog('Column headers:', Object.keys(item));
+                        }
+                        
+                        // Fungsi untuk mencari nilai dari berbagai kemungkinan nama kolom
+                        function getValue(obj, possibleNames) {
+                            for (let name of possibleNames) {
+                                if (obj[name] !== undefined && obj[name] !== null && obj[name] !== '') {
+                                    return obj[name];
+                                }
+                            }
+                            return '';
+                        }
+                        
+                        // Cari koordinat dengan berbagai kemungkinan nama kolom
+                        let latValue = getValue(item, ['lat', 'Lat', 'latitude', 'Latitude', 'LAT', 'LATITUDE']);
+                        let lonValue = getValue(item, ['lon', 'Lon', 'lng', 'Lng', 'longitude', 'Longitude', 'LON', 'LONGITUDE']);
+                        
+                        // Konversi ke number dengan aman
+                        let lat = parseFloat(String(latValue || '').replace(',', '.'));
+                        let lon = parseFloat(String(lonValue || '').replace(',', '.'));
+                        
+                        // Validasi koordinat
+                        if (isNaN(lat) || isNaN(lon) || lat === 0 || lon === 0) {
+                            errors.push(`Baris ${index+1}: Koordinat tidak valid (lat: ${latValue}, lon: ${lonValue})`);
+                            return;
+                        }
+                        
+                        // Cari field lainnya
+                        let kota = getValue(item, ['kota', 'Kota', 'kabupaten', 'Kabupaten', 'city', 'City']) || '';
+                        let kecamatan = getValue(item, ['kecamatan', 'Kecamatan', 'district', 'District']) || '';
+                        let kelurahan = getValue(item, ['kelurahan', 'Kelurahan', 'desa', 'Desa', 'village', 'Village']) || '';
+                        let keterangan = getValue(item, ['keterangan', 'Keterangan', 'catatan', 'Catatan', 'notes', 'Notes', 'description', 'Description']) || '';
+                        let timestamp = getValue(item, ['timestamp', 'Timestamp', 'tanggal', 'Tanggal', 'date', 'Date']) || new Date().toISOString();
+                        
+                        // Buat locationId
+                        let locationId = (kota + kecamatan + kelurahan).toLowerCase()
+                            .replace(/\s+/g, '')
+                            .replace(/[^a-z0-9]/g, '');
+                        
+                        normalizedData.push({
+                            lat: lat,
+                            lon: lon,
+                            kota: kota,
+                            kecamatan: kecamatan,
+                            kelurahan: kelurahan,
+                            keterangan: keterangan || '(tanpa keterangan)',
+                            timestamp: timestamp,
+                            locationId: locationId,
+                            _source: 'google_sheets'
+                        });
+                        
+                    } catch (e) {
+                        errors.push(`Baris ${index+1}: ${e.message}`);
                     }
-                    return valid;
                 });
                 
                 debugLog('Data setelah normalisasi:', normalizedData);
                 
-                // Gabungkan dengan data dummy jika ada
-                if (USE_DUMMY_DATA) {
-                    // Hanya tambahkan data baru yang belum ada di dummy (hindari duplikat)
-                    var existingIds = new Set(reportsData.map(r => r.locationId));
-                    var newData = normalizedData.filter(item => !existingIds.has(item.locationId));
-                    reportsData = [...reportsData, ...newData];
+                if (errors.length > 0) {
+                    debugLog('Errors during normalization:', errors);
+                }
+                
+                if (normalizedData.length === 0) {
+                    setStatus('Tidak ada data valid dari Google Sheets', 'status-error');
+                    return;
+                }
+                
+                // Gabungkan dengan data yang sudah ada
+                if (reportsData.length > 0) {
+                    // Hanya tambahkan data baru yang belum ada (berdasarkan locationId + timestamp)
+                    var existingKeys = new Set(reportsData.map(r => 
+                        r.locationId + '_' + (r.timestamp || '')
+                    ));
+                    
+                    var newData = normalizedData.filter(item => {
+                        var key = item.locationId + '_' + (item.timestamp || '');
+                        return !existingKeys.has(key);
+                    });
+                    
+                    if (newData.length > 0) {
+                        reportsData = [...reportsData, ...newData];
+                        debugLog(`Menambahkan ${newData.length} data baru dari server`);
+                    } else {
+                        debugLog('Tidak ada data baru dari server');
+                    }
                 } else {
                     reportsData = normalizedData;
                 }
                 
                 debugLog('Total reportsData setelah load:', reportsData.length);
                 
+                // Simpan ke cache
+                saveToCache();
+                
+                // Render ulang
                 renderAllMarkers();
                 updateReportList();
-                setStatus("Data berhasil dimuat!", "status-success");
+                
+                setStatus(`Berhasil memuat ${normalizedData.length} data dari Google Sheets`, "status-success");
                 
             } catch (error) {
                 debugLog('Error loading data:', error);
                 setStatus("Gagal memuat database: " + error.message, "status-error");
-                
-                if (!USE_DUMMY_DATA) {
-                    alert("GAGAL MEMUAT DATA: " + error.message);
-                }
             }
         }
 
         // ==============================================================================
-        // TAMBAH LAPORAN BARU - INI BAGIAN YANG DIPERBAIKI
+        // FUNGSI REFRESH MANUAL
+        // ==============================================================================
+        function manualRefresh() {
+            setStatus('<span class="loading-spinner"></span> Merefresh data...', 'status-info');
+            loadDataFromGoogle();
+        }
+
+        // ==============================================================================
+        // TAMBAH LAPORAN BARU
         // ==============================================================================
         async function addReport() {
             var prov = document.getElementById('provinsi').value.trim();
@@ -334,7 +465,7 @@
             }
 
             addBtn.disabled = true;
-            setStatus("Mencari titik koordinat di peta...", "status-info");
+            setStatus('<span class="loading-spinner"></span> Mencari titik koordinat...', "status-info");
 
             var addressString = (kel ? kel + ", " : "") + kec + ", " + kota + ", " + prov + ", Indonesia";
             debugLog('Searching address:', addressString);
@@ -342,7 +473,7 @@
             var lat, lon, locationId;
 
             try {
-                // Gunakan Nominatim dengan delay untuk menghindari rate limiting
+                // Gunakan Nominatim dengan delay
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 
                 var nominatimRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressString)}&limit=1`);
@@ -354,7 +485,7 @@
                     lat = parseFloat(results[0].lat);
                     lon = parseFloat(results[0].lon);
                     
-                    // Buat locationId yang konsisten
+                    // Buat locationId
                     locationId = (kota + kec + kel).toLowerCase()
                         .replace(/\s+/g, '')
                         .replace(/[^a-z0-9]/g, '');
@@ -372,44 +503,40 @@
                 return;
             }
 
-            // ===== PERBAIKAN UTAMA: Pastikan data real masuk dengan format yang benar =====
-            
-            // Buat object laporan baru dengan format yang sama persis dengan dummy data
+            // Buat laporan baru
             var newReport = {
-                lat: lat,                    // Pastini ini number, bukan string
-                lon: lon,                    // Pastini ini number, bukan string
+                lat: lat,
+                lon: lon,
                 kota: kota,
                 kecamatan: kec,
                 kelurahan: kel,
                 keterangan: ket || "(tanpa keterangan)",
                 timestamp: new Date().toISOString(),
-                locationId: locationId
+                locationId: locationId,
+                _source: 'user_input'
             };
             
             debugLog('New report object:', newReport);
             
-            // Tambahkan ke reportsData (tanpa menghapus data yang sudah ada)
+            // Tambahkan ke reportsData
             reportsData.push(newReport);
             
+            // Simpan ke cache
+            saveToCache();
+            
             debugLog('reportsData after push:', reportsData);
-            debugLog('Total reportsData now:', reportsData.length);
             
             // Render ulang marker
             renderAllMarkers();
-            
-            // Update daftar laporan
             updateReportList();
             
             // Zoom ke lokasi baru
             map.setView([lat, lon], 14);
             
-            // Tampilkan pesan sukses
-            setStatus("Data real berhasil ditambahkan ke peta!", "status-success");
+            setStatus("Data berhasil ditambahkan ke peta!", "status-success");
             
-            // Kirim ke server jika URL sudah diisi
+            // Kirim ke server
             if (!scriptURL.includes('MASUKKAN_URL')) {
-                setStatus("Menyimpan data ke server...", "status-info");
-                
                 try {
                     var postData = new FormData();
                     postData.append('provinsi', prov);
@@ -422,22 +549,21 @@
                     postData.append('locationId', locationId);
                     postData.append('timestamp', newReport.timestamp);
 
-                    debugLog('Sending to server:', { prov, kota, kec, kel, ket, lat, lon, locationId });
-
-                    // Gunakan mode 'no-cors' tapi jangan tunggu respons
+                    debugLog('Sending to server...');
+                    
+                    // Gunakan fetch dengan promise
                     fetch(scriptURL, {
                         method: 'POST',
                         mode: 'no-cors',
                         body: postData
                     }).then(() => {
-                        debugLog('Data sent to server (no-cors mode)');
+                        debugLog('Data sent to server');
                     }).catch(error => {
                         debugLog('Error sending to server:', error);
                     });
 
                 } catch (error) {
                     debugLog('Error saving to server:', error);
-                    setStatus("Data tersimpan di peta tapi gagal ke server.", "status-warning");
                 }
             }
 
@@ -450,7 +576,7 @@
         }
 
         // ==============================================================================
-        // RENDER MARKER DI PETA - VERSI YANG LEBIH ROBUST
+        // RENDER MARKER DI PETA
         // ==============================================================================
         function renderAllMarkers() {
             debugLog('Rendering markers, total data:', reportsData.length);
@@ -471,62 +597,34 @@
                 // Validasi data
                 if (!r || typeof r !== 'object') {
                     invalidDataCount++;
-                    debugLog(`Data[${index}] tidak valid (bukan object):`, r);
                     return;
                 }
                 
-                // KONVERSI KOORDINAT YANG LEBIH AMAN
-                var lat, lon;
+                // Konversi koordinat
+                var lat = typeof r.lat === 'number' ? r.lat : parseFloat(String(r.lat || '').replace(',', '.'));
+                var lon = typeof r.lon === 'number' ? r.lon : parseFloat(String(r.lon || '').replace(',', '.'));
                 
-                // Handle lat
-                if (typeof r.lat === 'number') {
-                    lat = r.lat;
-                } else if (typeof r.lat === 'string') {
-                    lat = parseFloat(r.lat.replace(',', '.'));
-                } else {
-                    lat = parseFloat(r.lat);
-                }
-                
-                // Handle lon
-                if (typeof r.lon === 'number') {
-                    lon = r.lon;
-                } else if (typeof r.lon === 'string') {
-                    lon = parseFloat(r.lon.replace(',', '.'));
-                } else {
-                    lon = parseFloat(r.lon);
-                }
-                
-                // Validasi koordinat
+                // Validasi
                 var isValid = !isNaN(lat) && !isNaN(lon) && 
                               isFinite(lat) && isFinite(lon) &&
-                              lat >= -90 && lat <= 90 && 
-                              lon >= -180 && lon <= 180;
+                              Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
                 
                 if (!isValid) {
                     invalidDataCount++;
-                    debugLog(`Data[${index}] koordinat tidak valid:`, { 
-                        original: r, 
-                        lat: r.lat, 
-                        lon: r.lon,
-                        parsedLat: lat, 
-                        parsedLon: lon 
-                    });
                     return;
                 }
                 
                 validDataCount++;
                 
-                // Buat locationId jika tidak ada
+                // Pastikan locationId ada
                 if (!r.locationId) {
                     r.locationId = (r.kota || '') + (r.kecamatan || '') + (r.kelurahan || '');
                     r.locationId = r.locationId.toLowerCase().replace(/[^a-z0-9]/g, '');
                 }
                 
-                // Gunakan locationId sebagai kunci
                 var locKey = String(r.locationId || `loc-${index}`);
                 
                 if (!uniqueLocations[locKey]) {
-                    // Nama yang ditampilkan
                     var displayName = r.kelurahan ? r.kelurahan : (r.kecamatan || 'Lokasi');
                     
                     uniqueLocations[locKey] = {
@@ -537,8 +635,6 @@
                         count: 0,
                         keteranganList: []
                     };
-                    
-                    debugLog('New unique location:', { locKey, lat, lon, displayName });
                 }
                 
                 uniqueLocations[locKey].count++;
@@ -549,29 +645,26 @@
                         if (r.timestamp) {
                             dateStr = new Date(r.timestamp).toLocaleDateString('id-ID');
                         }
-                    } catch (e) {
-                        // Abaikan error date
-                    }
+                    } catch (e) {}
                     uniqueLocations[locKey].keteranganList.push(`<i>[${dateStr}]</i> ${r.keterangan}`);
                 }
             });
             
-            debugLog(`Data valid: ${validDataCount}, Data tidak valid: ${invalidDataCount}, Total: ${reportsData.length}`);
-            debugLog('Unique locations:', Object.keys(uniqueLocations).length);
+            debugLog(`Data valid: ${validDataCount}, Tidak valid: ${invalidDataCount}`);
             
             var markerCount = 0;
             
             for (var id in uniqueLocations) {
                 var loc = uniqueLocations[id];
                 
-                // Hitung radius (min 10, max 40)
+                // Hitung radius
                 var calculatedRadius = Math.min(40, 10 + ((loc.count - 1) * 8));
-                
-                debugLog(`Rendering marker for ${id}: radius=${calculatedRadius}, count=${loc.count}, pos=[${loc.lat}, ${loc.lon}]`);
                 
                 var ketHtml = loc.keteranganList.length > 0 
                     ? `<div style="text-align:left; font-size:11px; margin-top:10px; max-height:100px; overflow-y:auto; background:#f8f9fa; padding:5px; border-radius:4px; border:1px solid #ddd;">
-                       <strong>Catatan Laporan (${loc.keteranganList.length}):</strong><br>${loc.keteranganList.join('<br><hr style="margin:4px 0;">')}</div>` 
+                       <strong>Catatan Laporan (${loc.keteranganList.length}):</strong><br>${loc.keteranganList.slice(-5).join('<br><hr style="margin:4px 0;">')}
+                       ${loc.keteranganList.length > 5 ? '<br><em>...dan ' + (loc.keteranganList.length - 5) + ' lainnya</em>' : ''}
+                       </div>` 
                     : "<div style='text-align:left; font-size:11px; margin-top:10px; color:#95a5a6;'>Tidak ada keterangan</div>";
 
                 var popupText = `
@@ -614,7 +707,6 @@
             
             debugLog(`Total marker dirender: ${markerCount}`);
             
-            // Update status
             if (markerCount === 0) {
                 if (validDataCount > 0) {
                     setStatus(`Ada ${validDataCount} data valid tapi gagal dirender`, 'status-error');
@@ -635,14 +727,18 @@
             // Filter data valid
             var validData = reportsData.filter(r => {
                 if (!r) return false;
-                
                 var lat = typeof r.lat === 'number' ? r.lat : parseFloat(String(r.lat || '').replace(',', '.'));
                 var lon = typeof r.lon === 'number' ? r.lon : parseFloat(String(r.lon || '').replace(',', '.'));
                 return !isNaN(lat) && !isNaN(lon) && isFinite(lat) && isFinite(lon);
             });
             
+            // Urutkan berdasarkan timestamp terbaru
+            var sortedData = [...validData].sort((a, b) => {
+                return new Date(b.timestamp || 0) - new Date(a.timestamp || 0);
+            });
+            
             // Ambil 5 data terbaru
-            var lastReports = validData.slice(-5).reverse();
+            var lastReports = sortedData.slice(0, 5);
             
             lastReports.forEach(function(r) {
                 let shortDate = 'baru';
@@ -667,33 +763,33 @@
             // Header dengan total
             let totalValid = validData.length;
             let totalAll = reportsData.length;
-            listHtml = `<li style="text-align:center; background:#e2e8f0; font-weight:bold; padding:8px;">Total Laporan Valid: ${totalValid} dari ${totalAll}</li>` + listHtml;
+            let fromCache = reportsData.some(r => r._cached) ? ' (dari cache)' : '';
+            listHtml = `<li style="text-align:center; background:#e2e8f0; font-weight:bold; padding:8px;">Total Laporan: ${totalValid} dari ${totalAll}${fromCache}</li>` + listHtml;
             
             document.getElementById('report-list').innerHTML = listHtml;
-            debugLog('Report list updated, total valid:', totalValid);
         }
 
         // ==============================================================================
-        // FUNGSI UNTUK TESTING INPUT DATA REAL
+        // FUNGSI UNTUK RESET CACHE (jika diperlukan)
         // ==============================================================================
-        function testAddRealData() {
-            // Fungsi ini untuk testing manual di console browser
-            var testReport = {
-                lat: -6.5950,
-                lon: 106.7890,
-                kota: "Kota Bogor",
-                kecamatan: "Bogor Tengah",
-                kelurahan: "Pabaton",
-                keterangan: "Test real data from console",
-                timestamp: new Date().toISOString(),
-                locationId: "testreal" + Date.now()
-            };
-            
-            reportsData.push(testReport);
-            renderAllMarkers();
-            updateReportList();
-            console.log('Test data added:', testReport);
+        function resetCache() {
+            if (confirm('Hapus semua data cache?')) {
+                localStorage.removeItem(CACHE_KEY);
+                reportsData = [];
+                renderAllMarkers();
+                updateReportList();
+                setStatus('Cache dihapus', 'status-info');
+                debugLog('Cache cleared');
+            }
         }
+
+        // Ekspos fungsi ke global untuk debugging
+        window.resetCache = resetCache;
+        window.manualRefresh = manualRefresh;
+        window.debug = {
+            reportsData: () => reportsData,
+            cache: () => loadFromCache()
+        };
     </script>
 </body>
 </html>
